@@ -215,7 +215,7 @@ function Build-MkDocsNav {
     foreach ($cat in ($index.Keys | Sort-Object)) {
         $label = $cat -replace '^\d+-', '' -replace '-', ' '
         $label = (Get-Culture).TextInfo.ToTitleCase($label)
-        $nav += "  - $label:`n"
+        $nav += "  - $($label):`n"
         foreach ($skill in $index[$cat]) {
             # Mirror file into docs/ for mkdocs
             $destDir = Join-Path $DocsDir $cat
