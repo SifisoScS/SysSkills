@@ -9,4 +9,6 @@ Thumbs.db
 # Build
 node_modules/
 dist/
+site/
+docs/
 *.log
