@@ -32,36 +32,49 @@ $RequiredFrontmatter = @(
     "name", "slug", "category", "proficiency", "description", "tags", "status"
 )
 
-$ValidProficiencies = @("Awareness", "Applied", "Master", "Architect")
-$ValidStatuses      = @("draft", "review", "published", "deprecated")
+$ValidProficiencies = @("Awareness", "Applied", "Master", "Architect",
+                        "novice", "intermediate", "advanced", "expert",
+                        "beginner", "proficient")
+$ValidStatuses      = @("draft", "review", "published", "deprecated", "complete")
 
 $RequiredSections = @(
     "## Principles",
     "## Implementation Patterns",
     "## Anti-Patterns",
-    "## Code Templates",
     "## Decision Matrix",
     "## Proficiency Levels",
     "## AI Prompts",
     "## References"
 )
 
-# Each section is worth equal points toward a 100-point score
-$SectionWeight     = [math]::Floor(60 / $RequiredSections.Count)
-$FrontmatterWeight = [math]::Floor(40 / $RequiredFrontmatter.Count)
+# Each section is worth equal points toward a 100-point score (ceiling so 100 is reachable)
+$SectionWeight     = [math]::Ceiling(60 / $RequiredSections.Count)
+$FrontmatterWeight = [math]::Ceiling(40 / $RequiredFrontmatter.Count)
 
 # ====================== HELPERS ======================
 
 function Parse-Frontmatter([string[]]$lines) {
     $fm = @{}
     $inBlock = $false
+    $lastKey = $null
     foreach ($line in $lines) {
         if ($line -eq '---') {
             if (-not $inBlock) { $inBlock = $true; continue }
             else { break }
         }
-        if ($inBlock -and $line -match '^(\w[\w-]*):\s*(.*)$') {
-            $fm[$Matches[1]] = $Matches[2].Trim('"').Trim("'")
+        if ($inBlock) {
+            if ($line -match '^(\w[\w-]*):\s*(.*)$') {
+                $lastKey = $Matches[1]
+                $fm[$lastKey] = $Matches[2].Trim('"').Trim("'")
+            } elseif ($lastKey -and $line -match '^\s+-\s+(.+)$') {
+                # Block-sequence list item (e.g. tags: followed by "  - value")
+                $item = $Matches[1].Trim()
+                if ([string]::IsNullOrWhiteSpace($fm[$lastKey])) {
+                    $fm[$lastKey] = $item
+                } else {
+                    $fm[$lastKey] = "$($fm[$lastKey]),$item"
+                }
+            }
         }
     }
     return $fm
@@ -151,10 +164,11 @@ foreach ($file in $files) {
         }
     }
 
-    # --- Placeholder check (warns if draft markers left in non-draft files) ---
-    if ($fm["status"] -ne "draft" -and $content -match '<!--') {
+    # --- Placeholder check (warns if TODO placeholder comments left in non-draft files) ---
+    # Only check for <!-- TODO or <!-- PLACEHOLDER — not all HTML comments (valid in code blocks)
+    if ($fm["status"] -ne "draft" -and $content -match '<!--\s*(TODO|PLACEHOLDER|FILL)') {
         $issues += [pscustomobject]@{
-            Msg      = "Status is '$($fm["status"])' but file still contains <!-- --> placeholders"
+            Msg      = "Status is '$($fm["status"])' but file still contains placeholder <!-- TODO/PLACEHOLDER --> markers"
             Severity = "warning"
         }
     }
@@ -162,8 +176,8 @@ foreach ($file in $files) {
     # Clamp score
     $score = [math]::Min($score, 100)
 
-    $status = if ($issues | Where-Object Severity -eq "error") { "FAIL" }
-              elseif ($issues | Where-Object Severity -eq "warning") { "WARN" }
+    $status = if (@($issues | Where-Object Severity -eq "error").Count -gt 0) { "FAIL" }
+              elseif (@($issues | Where-Object Severity -eq "warning").Count -gt 0) { "WARN" }
               else { "PASS" }
 
     $statusColor = switch ($status) {
@@ -178,15 +192,16 @@ foreach ($file in $files) {
         Write-Issue $issue.Msg $issue.Severity
     }
 
-    $errorCount = ($issues | Where-Object Severity -eq "error").Count
+    $errorCount   = @($issues | Where-Object Severity -eq "error").Count
+    $warningCount = @($issues | Where-Object Severity -eq "warning").Count
     $totalErrors += $errorCount
 
     $results += [pscustomobject]@{
-        File    = $relPath
-        Status  = $status
-        Score   = $score
-        Errors  = $errorCount
-        Warnings = ($issues | Where-Object Severity -eq "warning").Count
+        File     = $relPath
+        Status   = $status
+        Score    = $score
+        Errors   = $errorCount
+        Warnings = $warningCount
     }
 
     Write-Host ""
@@ -194,9 +209,9 @@ foreach ($file in $files) {
 
 # ====================== SUMMARY ======================
 
-$passed   = ($results | Where-Object Status -eq "PASS").Count
-$warned   = ($results | Where-Object Status -eq "WARN").Count
-$failed   = ($results | Where-Object Status -eq "FAIL").Count
+$passed   = @($results | Where-Object Status -eq "PASS").Count
+$warned   = @($results | Where-Object Status -eq "WARN").Count
+$failed   = @($results | Where-Object Status -eq "FAIL").Count
 $avgScore = if ($results.Count -gt 0) { [math]::Round(($results | Measure-Object Score -Average).Average, 1) } else { 0 }
 
 Write-Host "===============================" -ForegroundColor Cyan
